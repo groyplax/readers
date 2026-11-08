@@ -1530,6 +1530,27 @@ function openCompose(mode) {
   document.body.style.overflow = 'hidden';
   setTimeout(() => { ta.focus(); if (mode !== 'new') ta.setSelectionRange(0, 0); ta.scrollTop = 0; }, 60);
 }
+// Links are useless in a read-aloud reader and clutter the text: on import
+// (file or paste) [text](url) → text, [[Note|alias]] → alias, [[Note]] → Note;
+// images and ![[embeds]] are dropped. This is an explicit, visible edit in the
+// compose box before saving — not a silent display rewrite.
+const MD_LINK = /(!?)\[([^\[\]\n]*)\]\((?:<[^>\n]*>|(?:[^()\s]|\([^()\s]*\))*)(?:[ \t]+(?:"[^"\n]*"|'[^'\n]*'))?\)/g;
+const WIKI_LINK = /(!?)\[\[([^\[\]\n]+)\]\]/g;
+function unlinkMarkdown(text) {
+  let n = 0;
+  const out = text
+    .replace(WIKI_LINK, (m, bang, inner) => {
+      n++;
+      if (bang) return '';
+      const [target, alias] = inner.split('|');
+      return (alias || target.replace(/#\^.*$/, '').replace(/#/g, ' ')).trim();
+    })
+    .replace(MD_LINK, (m, bang, label) => { n++; return bang ? '' : label; })
+    .replace(/<(https?:\/\/[^\s<>]+)>/g, '$1');
+  return { text: out, links: n };
+}
+function linkToast(n) { if (n) toast(`Removed ${n} link${n === 1 ? '' : 's'} — kept the words`); }
+
 // Fill compose from a file; the filename becomes the title (Obsidian notes
 // are named by title) unless one is already typed.
 function loadFileIntoCompose(file) {
@@ -1539,7 +1560,9 @@ function loadFileIntoCompose(file) {
   file.text().then(t => {
     if (!composeMode) openCompose('new');
     const ta = document.getElementById('textInput'), ti = document.getElementById('titleInput');
-    ta.value = t.replace(/^\uFEFF/, '');
+    const u = unlinkMarkdown(t.replace(/^\uFEFF/, ''));
+    ta.value = u.text;
+    linkToast(u.links);
     if (!ti.value.trim()) ti.value = file.name.replace(/\.(md|markdown|txt)$/i, '').trim().slice(0, 120);
     ta.dispatchEvent(new Event('input'));  // word count + draft
     ta.scrollTop = 0;
@@ -2183,6 +2206,18 @@ function updateProgress(force) {
 // ════════════════════════════════════════
 // META / READ TIME
 // ════════════════════════════════════════
+// Pasting Markdown (e.g. from Obsidian's editor) gets the same link cleanup.
+document.getElementById('textInput').addEventListener('paste', (e) => {
+  const t = e.clipboardData && e.clipboardData.getData('text/plain');
+  if (!t) return;
+  const u = unlinkMarkdown(t);
+  if (!u.links) return;  // nothing to clean: let the browser paste normally
+  e.preventDefault();
+  const ta = e.target;
+  ta.setRangeText(u.text, ta.selectionStart, ta.selectionEnd, 'end');
+  ta.dispatchEvent(new Event('input'));
+  linkToast(u.links);
+});
 document.getElementById('textInput').addEventListener('input', () => {
   updateComposeCount();
   if (composeMode !== 'new') return;  // only unsaved new pastes are drafts
