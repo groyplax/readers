@@ -627,6 +627,11 @@
     -webkit-appearance: none;
   }
   .menu-item:hover { background: var(--surface2); }
+  .menu-sec {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.58rem; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--text-muted);
+    border-top: 1px solid var(--border); margin: 6px 4px 2px; padding: 9px 6px 3px;
+  }
   .menu-item.active { color: var(--accent); background: var(--hl-sentence); }
   .speed-menu .menu-item { text-align: center; font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; border: 1px solid var(--border); }
   .status-dot {
@@ -2062,6 +2067,21 @@ function renderSleepMenu() {
     b.addEventListener('click', () => setSleep(v === null || v === 'chapter' ? v : v * 60000));
     m.appendChild(b);
   });
+  const h = document.createElement('div');
+  h.className = 'menu-sec'; h.textContent = 'When a text ends';
+  m.appendChild(h);
+  [['Play next in group', true], ['Stop', false]].forEach(([label, v]) => {
+    const b = document.createElement('button');
+    b.className = 'menu-item' + (autoNext === v ? ' active' : '');
+    b.textContent = label;
+    b.addEventListener('click', () => {
+      autoNext = v;
+      try { localStorage.setItem('vox_autonext', v ? '1' : '0'); } catch (e) {}
+      closeMenus();
+      toast(v ? 'Will keep going to the next text in the group' : 'Will stop at the end of each text');
+    });
+    m.appendChild(b);
+  });
 }
 function sleepFire() {
   sleepLeft = null;
@@ -2202,7 +2222,30 @@ function advanceFrom(sIdx) {
   speakUnit(g);
 }
 
+// ════ AUTO-NEXT ══════════════════════════
+// At the end of a text, carry on with the next one in the same group (series
+// order, as the library lists it). Off for ungrouped texts, the last one in a
+// group, or an "end of chapter" sleep timer. Minute sleep timers keep counting.
+let autoNext = localStorage.getItem('vox_autonext') !== '0';
+function nextInGroup() {
+  const books = getBooks();
+  const cur = books.find(b => b.id === curBookId);
+  if (!cur || !cur.group) return null;
+  const list = books.filter(b => b.group === cur.group).sort(seriesOrder);
+  return list[list.findIndex(b => b.id === cur.id) + 1] || null;
+}
+function playNext(next) {
+  curWord = words.length;
+  savePos();  // mark this one finished
+  openBook(next.id);
+  if (curWord >= words.length - 1) curWord = firstSpoken();  // already finished before: start over
+  togglePlay();
+  toast('Up next: ' + next.title);
+}
+
 function finishedReading() {
+  const next = autoNext && sleepLeft !== 'chapter' ? nextInGroup() : null;
+  if (next) { playNext(next); return; }
   if (sleepLeft !== null) { sleepLeft = null; updateSleepBtn(); }
   wantPlaying = false;
   playing = false;
