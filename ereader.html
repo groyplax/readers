@@ -283,22 +283,68 @@
   .lib-search:focus, .meta-input:focus { border-color: var(--accent); }
   .lib-search::placeholder, .meta-input::placeholder { color: var(--text-muted); font-style: italic; }
 
-  .grp-tabs {
-    display: flex; flex-wrap: wrap; gap: 6px;
-    padding: 10px 0 4px;
-  }
-  .grp-tabs[hidden] { display: none; }
-  .grp-tab {
-    flex-shrink: 0; white-space: nowrap; cursor: pointer;
-    border: 1px solid var(--border); background: transparent;
-    color: var(--text-muted); border-radius: 999px; padding: 5px 12px;
-    font-family: 'Lora', serif; font-size: 0.8rem;
-    transition: color var(--tr), border-color var(--tr), background var(--tr);
+  /* Shelf header (inside a group): back link + group name */
+  .shelf-head { padding: 12px 0 2px; }
+  .shelf-head[hidden] { display: none; }
+  .shelf-back {
+    background: none; border: none; padding: 2px 0; cursor: pointer;
+    color: var(--text-muted); font-family: 'Lora', serif; font-size: 0.82rem;
     -webkit-appearance: none;
   }
-  .grp-tab:hover { color: var(--text); }
-  .grp-tab .n { font-family: 'JetBrains Mono', monospace; font-size: 0.62rem; opacity: 0.7; margin-left: 5px; }
-  .grp-tab.active { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  .shelf-back:hover { color: var(--accent); }
+  .shelf-name {
+    font-family: 'Playfair Display', serif; font-size: 1.3rem; font-weight: 600;
+    color: var(--text); margin-top: 4px; line-height: 1.25; overflow-wrap: anywhere;
+  }
+  .shelf-sub { font-family: 'JetBrains Mono', monospace; font-size: 0.62rem; color: var(--text-muted); margin-top: 3px; }
+
+  /* Shelf cards (library home): one per group */
+  .shelf-card {
+    position: relative; display: flex; align-items: center; gap: 12px;
+    padding: 14px 14px 17px 16px; margin-bottom: 10px;
+    background: var(--surface2); border: 1.5px solid var(--border);
+    border-left: 4px solid var(--accent);
+    border-radius: 12px; cursor: pointer; overflow: hidden;
+    transition: border-color var(--tr);
+  }
+  .shelf-card:hover { border-color: var(--accent); }
+  .shelf-card.loose { border-left-color: var(--text-muted); }
+  .sc-main { flex: 1; min-width: 0; }
+  .sc-name {
+    font-family: 'Playfair Display', serif; font-size: 1.08rem; font-weight: 600;
+    color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .sc-meta {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.62rem; color: var(--text-muted);
+    margin-top: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .sc-next { font-family: 'Lora', serif; font-size: 0.8rem; color: var(--accent); margin-top: 5px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sc-arrow { color: var(--text-muted); font-size: 1.4rem; line-height: 1; flex-shrink: 0; }
+
+  /* Group picker: all existing groups, one tap to pick (replaces <datalist>,
+     which only listed names matching what was already typed). */
+  .grp-wrap { position: relative; flex: 1; min-width: 0; }
+  .grp-wrap .meta-input { padding-right: 28px; }
+  .grp-caret { position: absolute; right: 11px; top: 50%; transform: translateY(-50%);
+    color: var(--text-muted); font-size: 0.7rem; pointer-events: none; }
+  .grp-menu {
+    position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 50;
+    min-width: 180px; max-height: 240px; overflow-y: auto;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 9px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.35); padding: 4px;
+  }
+  .grp-menu[hidden] { display: none; }
+  .grp-opt {
+    display: flex; justify-content: space-between; gap: 10px; width: 100%;
+    background: none; border: none; border-radius: 6px; padding: 8px 10px;
+    color: var(--text); font-family: 'Lora', serif; font-size: 0.88rem;
+    text-align: left; cursor: pointer; -webkit-appearance: none;
+  }
+  .grp-opt .n { font-family: 'JetBrains Mono', monospace; font-size: 0.62rem; color: var(--text-muted); align-self: center; }
+  .grp-opt.cur { color: var(--accent); }
+  .grp-opt.hi, .grp-opt:hover { background: var(--surface2); }
+  .grp-opt.muted { color: var(--text-muted); font-style: italic; }
 
   .drawer-body {
     flex: 1 1 auto; min-height: 0;
@@ -407,7 +453,6 @@
   }
   .compose-row { display: flex; gap: 8px; }
   .compose-row #titleInput { flex: 2; }
-  .compose-row #groupInput { flex: 1; }
   .file-btn { flex-shrink: 0; padding: 8px 14px; border-radius: 9px; white-space: nowrap; }
   #textInput {
     flex: 1; min-height: 120px; width: 100%;
@@ -746,7 +791,11 @@
   </div>
   <div class="drawer-tools">
     <input id="libSearch" class="lib-search" type="search" placeholder="Search titles, groups, text…" oninput="renderLibrary()" autocomplete="off">
-    <div class="grp-tabs" id="grpTabs" hidden></div>
+    <div class="shelf-head" id="shelfHead" hidden>
+      <button class="shelf-back" onclick="setLibTab('')">‹ All groups</button>
+      <div class="shelf-name" id="shelfName"></div>
+      <div class="shelf-sub" id="shelfSub"></div>
+    </div>
   </div>
   <div class="drawer-body">
     <div id="libList"></div>
@@ -758,7 +807,6 @@
     <input type="file" id="importFile" accept=".json,application/json" hidden onchange="importLibrary(this)">
   </div>
 </div>
-<datalist id="groupList"></datalist>
 
 <!-- COMPOSE: new text / edit text -->
 <div class="compose-overlay" id="composeOverlay" onclick="closeCompose()"></div>
@@ -770,7 +818,7 @@
   <div class="compose-body">
     <div class="compose-row">
       <input id="titleInput" class="meta-input" placeholder="Title (optional — uses first line)" autocomplete="off">
-      <input id="groupInput" class="meta-input" list="groupList" placeholder="Group (optional)" autocomplete="off">
+      <div class="grp-wrap"><input id="groupInput" class="meta-input" placeholder="Group (optional)" autocomplete="off"></div>
       <button class="ghost-btn file-btn" onclick="document.getElementById('mdFile').click()" title="Open a .md or .txt file (e.g. an Obsidian note)">📄 Open file…</button>
       <input type="file" id="mdFile" accept=".md,.markdown,.txt,text/plain,text/markdown" multiple hidden onchange="loadFiles(this.files); this.value = ''">
     </div>
@@ -1033,6 +1081,7 @@ function openDrawer() {
   document.getElementById('drawerOverlay').classList.add('open');
   document.body.style.overflow = 'hidden';
   editingBookId = null;
+  libScrollPending = true;
   renderLibrary();  // refresh progress / "read x ago" for the open book
 }
 function closeDrawer() {
@@ -1221,8 +1270,10 @@ function fmtAgo(t) {
   if (d < 7) return d + ' days ago';
   return new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
+let libScrollPending = false;  // scroll a shelf to the last-read text once, on entry
 function setLibTab(t) {
   libTab = t;
+  libScrollPending = true;
   try { localStorage.setItem('vox_lib_tab', t); } catch (e) {}
   editingBookId = null;
   renderLibrary();
@@ -1235,36 +1286,17 @@ function renderLibrary() {
   const ungroupedN = books.filter(b => !b.group).length;
   if (libTab === UNGROUPED ? !(groups.length && ungroupedN) : libTab && !groups.includes(libTab)) libTab = '';
 
-  const dl = document.getElementById('groupList');
-  dl.innerHTML = '';
-  groups.forEach(g => { const o = document.createElement('option'); o.value = g; dl.appendChild(o); });
-
-  const tabs = document.getElementById('grpTabs');
-  tabs.innerHTML = '';
-  const addTab = (key, label, n) => {
-    const t = document.createElement('button');
-    t.className = 'grp-tab' + (libTab === key ? ' active' : '');
-    t.innerHTML = '<span></span><span class="n">' + n + '</span>';
-    t.firstChild.textContent = label;
-    t.addEventListener('click', () => setLibTab(key));
-    tabs.appendChild(t);
-  };
-  if (groups.length) {
-    addTab('', 'All', books.length);
-    groups.forEach(g => addTab(g, g, books.filter(b => b.group === g).length));
-    if (ungroupedN) addTab(UNGROUPED, 'Ungrouped', ungroupedN);
-  }
-  tabs.hidden = !groups.length || !!q;
-
-  const inTab = b => !libTab || (libTab === UNGROUPED ? !b.group : b.group === libTab);
-  const shown = books
-    .filter(b => q ? (b.title + ' ' + (b.group || '') + ' ' + b.text).toLowerCase().includes(q) : inTab(b))
-    .sort((a, b) => (b.opened || b.added) - (a.opened || a.added));
-  const showGroup = !libTab || !!q;
-
+  // Home = "Continue" + one shelf card per group; a shelf lists its texts in
+  // series order (natural title sort: "002 - Letter 2" before "010 - …").
+  // Search always lists matching texts across everything.
+  const recent = b => b.opened || b.added;
+  const inProgress = b => bookPos(b) > 0 && bookPct(b) < 99;
+  const isDone = b => bookPos(b) > 0 && bookPct(b) >= 99;
+  const shelved = !q && groups.length > 0;
+  const inShelf = shelved && !!libTab;
   const list = document.getElementById('libList');
   list.innerHTML = '';
-  const section = (label, items) => {
+  const section = (label, items, showGroup) => {
     if (label) {
       const h = document.createElement('div');
       h.className = 'lib-sec';
@@ -1273,22 +1305,123 @@ function renderLibrary() {
     }
     items.forEach(b => list.appendChild(bookRow(b, showGroup)));
   };
-  if (!shown.length) {
-    list.innerHTML = '<div class="lib-empty"></div>';
-    list.firstChild.textContent = q ? 'No matches.'
-      : books.length ? 'Nothing in this group yet.'
-      : 'Your library is empty.\nTap + New to add a text.';
-    list.firstChild.style.whiteSpace = 'pre-line';
-  } else if (!q && !libTab && shown.length > 4) {
-    const cont = shown.filter(b => bookPos(b) > 0 && bookPct(b) < 99).slice(0, 3);
-    if (cont.length) {
-      section('Continue reading', cont);
-      section('All texts', shown.filter(b => !cont.includes(b)));
-    } else section(null, shown);
-  } else section(null, shown);
 
+  const head = document.getElementById('shelfHead');
+  head.hidden = !inShelf;
+  if (inShelf) {
+    const items = books.filter(b => libTab === UNGROUPED ? !b.group : b.group === libTab).sort(seriesOrder);
+    const done = items.filter(isDone).length;
+    document.getElementById('shelfName').textContent = libTab === UNGROUPED ? 'Ungrouped' : libTab;
+    document.getElementById('shelfSub').textContent =
+      items.length + (items.length === 1 ? ' text' : ' texts') + (done ? ' · ' + done + ' finished' : '');
+    section(null, items, false);
+    // Long series: bring the one you were on into view.
+    const last = items.filter(b => b.opened).sort((a, b) => b.opened - a.opened)[0];
+    if (last && items.length > 8 && libScrollPending) {
+      const row = [...list.querySelectorAll('.book-row')][items.indexOf(last)];
+      if (row) requestAnimationFrame(() => { row.scrollIntoView({ block: 'center' }); });
+    }
+  } else if (shelved) {
+    const cont = books.filter(inProgress).sort((a, b) => recent(b) - recent(a)).slice(0, 3);
+    if (cont.length) section('Continue', cont, true);
+    const h = document.createElement('div');
+    h.className = 'lib-sec';
+    h.textContent = 'Groups';
+    list.appendChild(h);
+    const shelves = groups.map(g => [g, books.filter(b => b.group === g)])
+      .sort((a, b) => Math.max(...b[1].map(recent)) - Math.max(...a[1].map(recent)));
+    if (ungroupedN) shelves.push([UNGROUPED, books.filter(b => !b.group)]);
+    shelves.forEach(([key, items]) => list.appendChild(shelfCard(key, items, isDone, inProgress)));
+  } else {
+    const shown = books
+      .filter(b => !q || (b.title + ' ' + (b.group || '') + ' ' + b.text).toLowerCase().includes(q))
+      .sort(q ? (a, b) => recent(b) - recent(a) : seriesOrder);
+    if (!shown.length) {
+      list.innerHTML = '<div class="lib-empty"></div>';
+      list.firstChild.textContent = q ? 'No matches.' : 'Your library is empty.\nTap + New to add a text.';
+      list.firstChild.style.whiteSpace = 'pre-line';
+    } else section(null, shown, true);
+  }
+
+  libScrollPending = false;
   renderLibStats(books);
 }
+const seriesOrder = (a, b) => a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: 'base' });
+function shelfCard(key, items, isDone, inProgress) {
+  const card = document.createElement('div');
+  card.className = 'shelf-card' + (key === UNGROUPED ? ' loose' : '');
+  card.innerHTML = `<div class="sc-main"><div class="sc-name"></div><div class="sc-meta"></div><div class="sc-next" hidden></div></div>
+    <span class="sc-arrow">›</span><div class="br-bar"><div class="br-fill"></div></div>`;
+  card.querySelector('.sc-name').textContent = key === UNGROUPED ? 'Ungrouped' : key;
+  const done = items.filter(isDone).length;
+  card.querySelector('.sc-meta').textContent =
+    items.length + (items.length === 1 ? ' text' : ' texts') + (done ? ' · ' + done + ' finished' : '');
+  const cur = items.filter(inProgress).sort((a, b) => (b.opened || 0) - (a.opened || 0))[0];
+  if (cur) { const n = card.querySelector('.sc-next'); n.hidden = false; n.textContent = '▶ ' + cur.title; }
+  card.querySelector('.br-fill').style.width = Math.round(done / items.length * 100) + '%';
+  card.addEventListener('click', () => { setLibTab(key); document.querySelector('.drawer-body').scrollTop = 0; });
+  return card;
+}
+
+// ════ GROUP PICKER ═══════════════════════
+// Focus shows EVERY group (current one ticked); typing filters; a name that
+// doesn't exist yet just becomes a new group on save.
+function groupNames() {
+  const n = new Map();
+  getBooks().forEach(b => { if (b.group) n.set(b.group, (n.get(b.group) || 0) + 1); });
+  return [...n].sort((a, b) => a[0].localeCompare(b[0]));
+}
+function attachGroupPicker(input) {
+  const wrap = input.parentElement;
+  const caret = document.createElement('span');
+  caret.className = 'grp-caret'; caret.textContent = '▾';
+  const menu = document.createElement('div');
+  menu.className = 'grp-menu'; menu.hidden = true;
+  wrap.append(caret, menu);
+  let typed = false, hi = -1;
+  const opts = () => [...menu.querySelectorAll('.grp-opt')];
+  const pick = (v) => { input.value = v; close(); input.dispatchEvent(new Event('input')); };
+  const close = () => { menu.hidden = true; hi = -1; };
+  const render = () => {
+    const v = input.value.trim(), q = typed ? v.toLowerCase() : '';
+    const all = groupNames().filter(([g]) => !q || g.toLowerCase().includes(q));
+    menu.innerHTML = '';
+    const add = (label, value, n, cls) => {
+      const o = document.createElement('button');
+      o.type = 'button'; o.className = 'grp-opt' + (cls ? ' ' + cls : '');
+      o.innerHTML = '<span></span>' + (n != null ? '<span class="n"></span>' : '');
+      o.firstChild.textContent = label;
+      if (n != null) o.lastChild.textContent = n;
+      // pointerdown + preventDefault keeps focus in the input (no blur-close first)
+      o.addEventListener('pointerdown', (e) => { e.preventDefault(); pick(value); });
+      o.addEventListener('click', (e) => { e.preventDefault(); pick(value); });
+      menu.appendChild(o);
+    };
+    all.forEach(([g, n]) => add((g === v ? '✓ ' : '') + g, g, n, g === v ? 'cur' : ''));
+    if (v && typed && !all.some(([g]) => g === v)) add('New group “' + v + '”', v, null, 'muted');
+    if (v) add('No group', '', null, 'muted');
+    menu.hidden = !menu.children.length;
+  };
+  input.addEventListener('focus', () => { typed = false; render(); });
+  input.addEventListener('click', () => { if (menu.hidden) { typed = false; render(); } });
+  input.addEventListener('input', (e) => { if (e.isTrusted) { typed = true; hi = -1; render(); } });
+  input.addEventListener('blur', close);
+  input.addEventListener('keydown', (e) => {
+    if (menu.hidden) return;
+    const o = opts();
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      hi = (hi + (e.key === 'ArrowDown' ? 1 : -1) + o.length) % o.length;
+      o.forEach((x, i) => x.classList.toggle('hi', i === hi));
+      o[hi].scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'Enter' && hi >= 0) {
+      e.preventDefault(); e.stopPropagation(); o[hi].click();
+    } else if (e.key === 'Escape') {
+      e.stopPropagation(); close();
+    }
+  });
+}
+attachGroupPicker(document.getElementById('groupInput'));
 
 function renderLibStats(books) {
   let chars = 0;
@@ -1344,13 +1477,14 @@ function editPanel(b) {
   p.className = 'chip-edit';
   p.innerHTML = `
     <input class="meta-input e-title" placeholder="Title (blank = first line)" autocomplete="off">
-    <input class="meta-input e-group" list="groupList" placeholder="Group (blank = ungrouped)" autocomplete="off">
+    <div class="grp-wrap"><input class="meta-input e-group" placeholder="Group (blank = ungrouped)" autocomplete="off"></div>
     <div class="chip-edit-btns">
       <button class="save">Save</button><button class="edit">Edit text</button>
       <button class="cancel">Cancel</button><button class="del">Delete</button>
     </div>`;
   const ti = p.querySelector('.e-title'), gi = p.querySelector('.e-group');
   ti.value = b.title; gi.value = b.group || '';
+  attachGroupPicker(gi);
   const save = () => {
     const books = getBooks();
     const book = books.find(x => x.id === b.id);
