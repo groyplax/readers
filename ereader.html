@@ -292,6 +292,13 @@
     -webkit-appearance: none;
   }
   .shelf-back:hover { color: var(--accent); }
+  .shelf-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .shelf-del {
+    background: none; border: 1px solid transparent; border-radius: 7px; padding: 3px 8px; cursor: pointer;
+    color: var(--text-muted); font-family: 'Lora', serif; font-size: 0.78rem; -webkit-appearance: none;
+  }
+  .shelf-del:hover { color: #e05c5c; }
+  .shelf-del.arm { color: #fff; background: #c94a4a; border-color: #c94a4a; }
   .shelf-name {
     font-family: 'Playfair Display', serif; font-size: 1.3rem; font-weight: 600;
     color: var(--text); margin-top: 4px; line-height: 1.25; overflow-wrap: anywhere;
@@ -797,7 +804,10 @@
   <div class="drawer-tools">
     <input id="libSearch" class="lib-search" type="search" placeholder="Search titles, groups, text…" oninput="renderLibrary()" autocomplete="off">
     <div class="shelf-head" id="shelfHead" hidden>
-      <button class="shelf-back" onclick="setLibTab('')">‹ All groups</button>
+      <div class="shelf-top">
+        <button class="shelf-back" onclick="setLibTab('')">‹ All groups</button>
+        <button class="shelf-del" id="shelfDel" onclick="deleteGroupTap(this)">Delete group</button>
+      </div>
       <div class="shelf-name" id="shelfName"></div>
       <div class="shelf-sub" id="shelfSub"></div>
     </div>
@@ -1312,6 +1322,7 @@ function renderLibrary() {
   };
 
   const head = document.getElementById('shelfHead');
+  disarmGroupDelete();
   head.hidden = !inShelf;
   if (inShelf) {
     const items = books.filter(b => libTab === UNGROUPED ? !b.group : b.group === libTab).sort(seriesOrder);
@@ -1516,6 +1527,61 @@ function editPanel(b) {
   });
   setTimeout(() => { ti.focus(); ti.select(); }, 0);
   return p;
+}
+
+// Delete a whole group (the shelf you're in): first tap arms the button and
+// shows the count, a second tap within 4 s deletes; the toast's Undo restores
+// every text with its reading position.
+let groupDelTimer = null;
+function disarmGroupDelete() {
+  clearTimeout(groupDelTimer);
+  const b = document.getElementById('shelfDel');
+  if (b) { b.classList.remove('arm'); b.textContent = 'Delete group'; }
+}
+function groupMembers(key) { return getBooks().filter(b => key === UNGROUPED ? !b.group : b.group === key); }
+function deleteGroupTap(btn) {
+  if (!libTab) return;
+  if (!btn.classList.contains('arm')) {
+    const n = groupMembers(libTab).length;
+    btn.classList.add('arm');
+    btn.textContent = 'Tap again to delete ' + plural(n, 'text');
+    clearTimeout(groupDelTimer);
+    groupDelTimer = setTimeout(disarmGroupDelete, 4000);
+    return;
+  }
+  disarmGroupDelete();
+  const key = libTab;
+  const all = getBooks();
+  const gone = all.filter(b => key === UNGROUPED ? !b.group : b.group === key);
+  if (!gone.length) return;
+  const ids = new Set(gone.map(b => b.id));
+  const saved = {};
+  gone.forEach(b => { saved[b.id] = [localStorage.getItem('vox_pos_' + b.id), localStorage.getItem('vox_post_' + b.id)]; });
+  const wasOpen = curBookId && ids.has(curBookId) ? curBookId : null;
+  if (wasOpen) {
+    clearReader();
+    curBookId = null;
+    try { localStorage.removeItem('vox_last_book'); } catch (e) {}
+  }
+  saveBooks(all.filter(b => !ids.has(b.id)));
+  try { ids.forEach(id => { localStorage.removeItem('vox_pos_' + id); localStorage.removeItem('vox_post_' + id); }); } catch (e) {}
+  const label = key === UNGROUPED ? 'Ungrouped' : '"' + key + '"';
+  setLibTab('');
+  toast('Deleted ' + label + ' (' + plural(gone.length, 'text') + ')', { label: 'Undo', run: () => {
+    const now = getBooks();
+    const have = new Set(now.map(b => b.id));
+    saveBooks(now.concat(gone.filter(b => !have.has(b.id))));
+    try {
+      Object.entries(saved).forEach(([id, [pos, post]]) => {
+        if (pos !== null) localStorage.setItem('vox_pos_' + id, pos);
+        if (post !== null) localStorage.setItem('vox_post_' + id, post);
+      });
+    } catch (e) {}
+    if (wasOpen) openBook(wasOpen);
+    setLibTab(key);
+    openDrawer();
+    toast('Restored ' + label);
+  } });
 }
 
 // Deletes right away; the toast's Undo puts the text (and its position) back.
