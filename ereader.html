@@ -1518,20 +1518,38 @@ function editPanel(b) {
   return p;
 }
 
+// Deletes right away; the toast's Undo puts the text (and its position) back.
+// (No browser confirm() popup.)
 function deleteBook(id, ev) {
   ev.stopPropagation();
-  const book = getBooks().find(b => b.id === id);
-  if (!confirm('Delete "' + (book ? book.title : 'this book') + '" from the library?')) return;
-  if (curBookId === id) {
+  const books = getBooks();
+  const idx = books.findIndex(b => b.id === id);
+  if (idx < 0) return;
+  const book = books[idx];
+  const pos = localStorage.getItem('vox_pos_' + id), post = localStorage.getItem('vox_post_' + id);
+  const wasOpen = curBookId === id;
+  if (wasOpen) {
     clearReader();
     curBookId = null;
     try { localStorage.removeItem('vox_last_book'); } catch (e) {}
   }
-  saveBooks(getBooks().filter(b => b.id !== id));
+  books.splice(idx, 1);
+  saveBooks(books);
   try { localStorage.removeItem('vox_pos_' + id); localStorage.removeItem('vox_post_' + id); } catch (e) {}
   editingBookId = null;
   renderLibrary();
-  if (book) toast('Deleted "' + book.title + '"');
+  toast('Deleted "' + book.title + '"', { label: 'Undo', run: () => {
+    const now = getBooks();
+    if (now.some(b => b.id === id)) return;
+    now.splice(Math.min(idx, now.length), 0, book);
+    saveBooks(now);
+    try {
+      if (pos !== null) localStorage.setItem('vox_pos_' + id, pos);
+      if (post !== null) localStorage.setItem('vox_post_' + id, post);
+    } catch (e) {}
+    if (wasOpen) openBook(id); else renderLibrary();
+    toast('Restored "' + book.title + '"');
+  } });
 }
 
 // Open book's title: header (tap = library) + lock-screen media info.
