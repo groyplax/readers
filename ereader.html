@@ -772,7 +772,7 @@
       <input id="titleInput" class="meta-input" placeholder="Title (optional — uses first line)" autocomplete="off">
       <input id="groupInput" class="meta-input" list="groupList" placeholder="Group (optional)" autocomplete="off">
       <button class="ghost-btn file-btn" onclick="document.getElementById('mdFile').click()" title="Open a .md or .txt file (e.g. an Obsidian note)">📄 Open file…</button>
-      <input type="file" id="mdFile" accept=".md,.markdown,.txt,text/plain,text/markdown" hidden onchange="loadFileIntoCompose(this.files[0]); this.value = ''">
+      <input type="file" id="mdFile" accept=".md,.markdown,.txt,text/plain,text/markdown" multiple hidden onchange="loadFiles(this.files); this.value = ''">
     </div>
     <textarea id="textInput" placeholder="Paste your text here…" spellcheck="false"></textarea>
   </div>
@@ -1572,11 +1572,56 @@ document.addEventListener('dragover', (e) => {
   if (e.dataTransfer && [...e.dataTransfer.types].includes('Files')) e.preventDefault();
 });
 document.addEventListener('drop', (e) => {
-  const f = e.dataTransfer && e.dataTransfer.files[0];
-  if (!f) return;
+  const fs = e.dataTransfer && e.dataTransfer.files;
+  if (!fs || !fs.length) return;
   e.preventDefault();
-  loadFileIntoCompose(f);
+  loadFiles(fs);
 });
+// One file → compose (review before saving). Several → each becomes its own
+// text straight away, in filename order ("001 - Letter 1" first), filed under
+// the compose Group box if filled. Notes named "_…" (folder index notes like
+// _Work.md / _Author.md) are skipped; identical texts already saved are reused.
+const isTextFile = f => /\.(md|markdown|txt)$/i.test(f.name) || /^text\//.test(f.type);
+function loadFiles(list) {
+  const all = [...(list || [])];
+  if (all.length === 1) { loadFileIntoCompose(all[0]); return; }
+  const files = all.filter(f => isTextFile(f) && !/^_/.test(f.name) && f.size <= 4e6)
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+  if (!files.length) { toast('No .md or .txt files to import'); return; }
+  importFiles(files, all.length - files.length);
+}
+function importFiles(files, skipped) {
+  const g = composeMode ? document.getElementById('groupInput').value.trim().slice(0, 60) : '';
+  Promise.all(files.map(f => f.text().then(t => [f, t], () => [f, null]))).then(results => {
+    const books = getBooks();
+    const byText = new Set(books.map(b => b.text));
+    const now = Date.now();
+    let added = 0, dup = 0, links = 0;
+    const fresh = [];
+    results.forEach(([f, t], i) => {
+      if (t == null) { skipped++; return; }
+      const u = unlinkMarkdown(t.replace(/^﻿/, ''));
+      if (!u.text.trim()) { skipped++; return; }
+      if (byText.has(u.text)) { dup++; return; }
+      byText.add(u.text);
+      links += u.links;
+      // Library lists newest first: stagger `added` so file order is kept.
+      const book = { id: now.toString(36) + i.toString(36) + Math.random().toString(36).slice(2, 6),
+        title: f.name.replace(/\.(md|markdown|txt)$/i, '').trim().slice(0, 120), customTitle: true,
+        text: u.text, words: countWords(u.text), added: now - i, updated: now };
+      if (g) book.group = g;
+      fresh.push(book);
+      added++;
+    });
+    if (!saveBooks(fresh.concat(books))) { toast('Storage full — nothing imported. Export a backup, then delete old texts'); return; }
+    if (composeMode) closeCompose();
+    if (added) setLibTab(g || '');
+    openDrawer();
+    const extra = [dup && dup + ' already in library', skipped && skipped + ' skipped'].filter(Boolean).join(', ');
+    toast(`Imported ${added} text${added === 1 ? '' : 's'}${g ? ' into "' + g + '"' : ''}` +
+      (links ? ` · removed ${links} links` : '') + (extra ? ` (${extra})` : ''));
+  });
+}
 
 function closeCompose() {
   composeMode = null;
