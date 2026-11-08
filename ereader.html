@@ -1803,7 +1803,8 @@ document.addEventListener('drop', (e) => {
 // One file → compose (review before saving). Several → each becomes its own
 // text straight away, in filename order ("001 - Letter 1" first), filed under
 // the compose Group box if filled. Notes named "_…" (folder index notes like
-// _Work.md / _Author.md) are skipped; identical texts already saved are reused.
+// _Work.md / _Author.md) are skipped; a text already in THAT group is skipped
+// (the same text may sit in other groups too, e.g. a "best of" selection).
 const isTextFile = f => /\.(md|markdown|txt)$/i.test(f.name) || /^text\//.test(f.type);
 function loadFiles(list) {
   const all = [...(list || [])];
@@ -1817,7 +1818,8 @@ function importFiles(files, skipped) {
   const g = composeMode ? document.getElementById('groupInput').value.trim().slice(0, 60) : '';
   Promise.all(files.map(f => f.text().then(t => [f, t], () => [f, null]))).then(results => {
     const books = getBooks();
-    const byText = new Set(books.map(b => b.text));
+    const key = (text, group) => (group || '') + '\x00' + text;
+    const byText = new Set(books.map(b => key(b.text, b.group)));
     const now = Date.now();
     let added = 0, dup = 0, links = 0;
     const fresh = [];
@@ -1825,8 +1827,8 @@ function importFiles(files, skipped) {
       if (t == null) { skipped++; return; }
       const u = unlinkMarkdown(t.replace(/^﻿/, ''));
       if (!u.text.trim()) { skipped++; return; }
-      if (byText.has(u.text)) { dup++; return; }
-      byText.add(u.text);
+      if (byText.has(key(u.text, g))) { dup++; return; }
+      byText.add(key(u.text, g));
       links += u.links;
       // Library lists newest first: stagger `added` so file order is kept.
       const book = { id: now.toString(36) + i.toString(36) + Math.random().toString(36).slice(2, 6),
@@ -1840,7 +1842,7 @@ function importFiles(files, skipped) {
     if (composeMode) closeCompose();
     if (added) setLibTab(g || '');
     openDrawer();
-    const extra = [dup && dup + ' already in library', skipped && skipped + ' skipped'].filter(Boolean).join(', ');
+    const extra = [dup && dup + ' already in ' + (g ? 'that group' : 'library'), skipped && skipped + ' skipped'].filter(Boolean).join(', ');
     toast(`Imported ${added} text${added === 1 ? '' : 's'}${g ? ' into "' + g + '"' : ''}` +
       (links ? ` · removed ${links} links` : '') + (extra ? ` (${extra})` : ''));
   });
