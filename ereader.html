@@ -1002,7 +1002,11 @@ let draftSaveTimer = null;
 const EMPTY_READER = document.getElementById('readerEmpty');
 
 // ════ BACKGROUND KEEP-ALIVE (experimental) ═
-const KEEPALIVE = true;
+// Only WebKit (iPhone/iPad/Safari) needs the silent loop to keep speech alive in
+// the background. On desktop Chrome it does nothing useful and is a suspected
+// trigger for Chrome's browser-wide speech wedge after a long pause
+// (issues.chromium.org/issues/572750556), so it's off there.
+const KEEPALIVE = IS_WEBKIT;
 let keepAliveEl = null;
 if (KEEPALIVE) {
   const sr = 8000, sec = 1, ch = 1;
@@ -2207,7 +2211,9 @@ function speakFrom(g) {
   if (synth.speaking || synth.pending) { activeUtterance = null; synth.cancel(); }
   playing = true;
   setPlayBtn(true);
-  setStatus(startedSincePlay ? 'Playing…' : 'Starting…', 'playing');
+  // During a watchdog retry, keep its "Still starting…" / "Reconnecting speech…"
+  // label instead of overwriting it; onstart switches to "Playing…".
+  if (!stallRetries) setStatus(startedSincePlay ? 'Playing…' : 'Starting…', 'playing');
   setCurrentWord(g);
   speakUnit(g);
 }
