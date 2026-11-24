@@ -1076,8 +1076,15 @@ setInterval(() => {
     const fix = IS_WEBKIT ? 'Close and reopen this tab, then press play.'
       : /Chrome/.test(navigator.userAgent) ? 'This is a Chrome bug: quit Chrome (⌘Q), reopen it, then press play. Safari also works meanwhile.'
       : 'Quit the browser (⌘Q), reopen it, then press play.';
-    setStatus('Speech engine stuck', 'paused');
-    toast('The speech engine is stuck and isn\'t starting. ' + fix);
+    if (startedSincePlay) {
+      // Speech was working, then one sentence kept stalling: the engine
+      // itself is probably fine, so don't tell the user to quit the browser.
+      setStatus('Speech stalled here', 'paused');
+      toast('Speech kept stalling on this sentence. Press play to retry, or skip ahead (▶▶). If nothing plays at all: ' + fix);
+    } else {
+      setStatus('Speech engine stuck', 'paused');
+      toast('The speech engine is stuck and isn\'t starting. ' + fix);
+    }
     return;
   }
   setStatus(startedSincePlay ? 'Reconnecting speech…' : 'Still starting…', 'playing');
@@ -1224,16 +1231,127 @@ function getSelectedVoice() { return voiceMap[selectedVoiceName] || null; }
 initVoices();
 
 // ════════════════════════════════════════
-// LIBRARY — books persisted in localStorage
+// LIBRARY — texts live in IndexedDB (no
+// 5M-character localStorage cap) and are
+// held in memory while the page is open.
+// Positions + settings stay in localStorage.
 // ════════════════════════════════════════
-function getBooks() {
-  try { return JSON.parse(localStorage.getItem('vox_books') || '[]'); }
-  catch (e) { return []; }
+// BOOKS is the in-memory library. getBooks() hands out a copy of the LIST (same
+// book objects); saveBooks(list) makes `list` the library and writes only the
+// books that changed or were removed. storeMode 'ls' = the old localStorage
+// storage, used only where the database can't be opened on a device that was
+// never migrated.
+let BOOKS = [];
+let booksReady = false;
+let storeMode = 'ls';
+let idb = null;
+const persisted = new Map();  // id → copy of the book as last written to the database
+const libChannel = 'BroadcastChannel' in window ? new BroadcastChannel('vox-library') : null;
+
+function getBooks() { return BOOKS.slice(); }
+function sameBook(a, b) {
+  const ka = Object.keys(a);
+  return ka.length === Object.keys(b).length && ka.every(k => a[k] === b[k]);
 }
 function saveBooks(books) {
-  try { localStorage.setItem('vox_books', JSON.stringify(books)); return true; }
-  catch (e) { return false; }
+  if (!booksReady) return false;
+  if (storeMode === 'ls') {
+    try { localStorage.setItem('vox_books', JSON.stringify(books)); }
+    catch (e) { return false; }
+    BOOKS = books.slice();
+    return true;
+  }
+  const seen = new Set();
+  const puts = books.filter(b => { seen.add(b.id); const p = persisted.get(b.id); return !p || !sameBook(b, p); });
+  const dels = [...persisted.keys()].filter(id => !seen.has(id));
+  BOOKS = books.slice();
+  if (!puts.length && !dels.length) return true;
+  try {
+    const tx = idb.transaction('books', 'readwrite');
+    const st = tx.objectStore('books');
+    const before = new Map();
+    puts.forEach(b => { before.set(b.id, persisted.get(b.id)); st.put(b); persisted.set(b.id, { ...b }); });
+    dels.forEach(id => { before.set(id, persisted.get(id)); st.delete(id); persisted.delete(id); });
+    tx.oncomplete = () => { if (libChannel) libChannel.postMessage('changed'); };
+    tx.onabort = () => {
+      // Nothing in this batch was written: forget it so the next save retries.
+      before.forEach((p, id) => { if (p) persisted.set(id, p); else persisted.delete(id); });
+      const full = tx.error && tx.error.name === 'QuotaExceededError';
+      toast('Couldn\'t save to the library database' + (full ? ' — the disk is full' : '') + '. Export a backup now.');
+    };
+  } catch (e) { return false; }
+  return true;
 }
+
+function idbOpen() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open('vox-reader', 1);
+    r.onupgradeneeded = () => { r.result.createObjectStore('books', { keyPath: 'id' }); };
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+    r.onblocked = () => rej(new Error('blocked'));
+    setTimeout(() => rej(new Error('timeout')), 8000);
+  });
+}
+function idbAll() {
+  return new Promise((res, rej) => {
+    const r = idb.transaction('books').objectStore('books').getAll();
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+function setLibrary(rows) {
+  BOOKS = rows.slice().sort((a, b) => (b.added || 0) - (a.added || 0));
+  persisted.clear();
+  BOOKS.forEach(b => persisted.set(b.id, { ...b }));
+}
+// Startup. First run on a device: copy the old localStorage library into the
+// database, read it back and compare every text before trusting it. The old
+// copy (`vox_books`) is left in place as a safety net until the next Export.
+async function loadLibrary() {
+  let legacy = [];
+  try { legacy = JSON.parse(localStorage.getItem('vox_books') || '[]'); } catch (e) {}
+  if (!Array.isArray(legacy)) legacy = [];
+  const migrated = localStorage.getItem('vox_idb') === '1';
+  try {
+    idb = await idbOpen();
+    if (!migrated && legacy.length) {
+      await new Promise((res, rej) => {
+        const tx = idb.transaction('books', 'readwrite');
+        const st = tx.objectStore('books');
+        st.clear();
+        legacy.forEach(b => st.put(b));
+        tx.oncomplete = res;
+        tx.onabort = () => rej(tx.error || new Error('aborted'));
+      });
+      const back = new Map((await idbAll()).map(b => [b.id, b]));
+      const ok = back.size === legacy.length &&
+        legacy.every(b => back.has(b.id) && back.get(b.id).text === b.text && back.get(b.id).title === b.title);
+      if (!ok) throw new Error('verify failed');
+    }
+    const rows = await idbAll();
+    if (!migrated) localStorage.setItem('vox_idb', '1');
+    setLibrary(rows);
+    storeMode = 'idb';
+    booksReady = true;
+    if (!migrated && legacy.length) toast('Library moved to roomier storage (' + plural(rows.length, 'text') + ') — the old size limit is gone');
+  } catch (e) {
+    if (migrated) {
+      // The library is in the database and it won't open: show nothing and
+      // refuse saves rather than fall back to the stale localStorage copy.
+      toast('Couldn\'t open the library database. Close other Vox Reader tabs, then reload this one.');
+      return;
+    }
+    storeMode = 'ls';
+    BOOKS = legacy;
+    booksReady = true;
+  }
+}
+// Another Vox Reader tab changed the library: pick up its changes.
+if (libChannel) libChannel.onmessage = async () => {
+  if (storeMode !== 'idb' || !booksReady) return;
+  try { setLibrary(await idbAll()); renderLibrary(); } catch (e) {}
+};
 function getPos(id) {
   return parseInt(localStorage.getItem('vox_pos_' + id) || '0', 10);
 }
@@ -1444,16 +1562,26 @@ function attachGroupPicker(input) {
 attachGroupPicker(document.getElementById('groupInput'));
 
 function renderLibStats(books) {
-  let chars = 0;
-  try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); chars += k.length + (localStorage.getItem(k) || '').length; } }
-  catch (e) {}
-  const pct = Math.round(chars / 5e6 * 100);  // browsers allow ~5M chars per site
   const last = parseInt(localStorage.getItem('vox_last_export') || '0', 10);
   const el = document.getElementById('libStats');
   el.innerHTML = '';
   const line1 = document.createElement('div');
-  line1.textContent = books.length + (books.length === 1 ? ' text' : ' texts') + ' · ' + Math.max(pct, books.length ? 1 : 0) + '% of storage';
-  if (pct >= 70) line1.className = 'warn';
+  if (storeMode === 'ls') {
+    // Fallback storage only: localStorage holds 5,242,880 characters per site
+    // (measured in Chrome 157), keys included.
+    let chars = 0;
+    try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); chars += k.length + (localStorage.getItem(k) || '').length; } }
+    catch (e) {}
+    const pct = Math.round(chars / 5242880 * 100);
+    line1.textContent = plural(books.length, 'text') + ' · ' + Math.max(pct, books.length ? 1 : 0) + '% of storage';
+    if (pct >= 70) line1.className = 'warn';
+  } else {
+    // Database storage: limited only by free disk space, so show the size.
+    let chars = 0;
+    books.forEach(b => { chars += b.text.length; });
+    const size = chars >= 1e6 ? (chars / 1e6).toFixed(1) + 'M' : Math.round(chars / 1e3) + 'k';
+    line1.textContent = plural(books.length, 'text') + (books.length ? ' · ' + size + ' characters' : '');
+  }
   const line2 = document.createElement('div');
   line2.textContent = last ? 'Backed up ' + fmtAgo(last) : 'Not backed up yet';
   // iPhone Safari may clear site data after ~7 days unvisited, so nag sooner there
@@ -1650,7 +1778,11 @@ function exportLibrary() {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-  try { localStorage.setItem('vox_last_export', String(Date.now())); } catch (e) {}
+  try {
+    localStorage.setItem('vox_last_export', String(Date.now()));
+    // A backup file now exists: drop the pre-database copy kept as a safety net.
+    if (storeMode === 'idb') localStorage.removeItem('vox_books');
+  } catch (e) {}
   toast('Exported ' + plural(books.length, 'text'));
   renderLibrary();
 }
@@ -2234,17 +2366,24 @@ function speakUnit(g) {
 
   // Before audio starts / between word events: STALL_MS. Voices that emit no
   // boundary events get the whole estimated utterance length plus slack.
-  const estMs = chunk.length * 60000 / (150 * speechRate);
+  // One "word" can be a 120-character file path or similar that the voice
+  // spells out for half a minute with no events inside it: such a word gets
+  // extra time per character. (A flat 6 s limit re-spoke it in a loop, then
+  // reported a stuck engine.)
+  const longMs = (w) => Math.max(0, w.spoken.length - 12) * 350 / engineRate(speechRate);
+  const longest = Math.max(...chunk.map(longMs));
+  const estMs = chunk.length * 60000 / (150 * speechRate) + chunk.reduce((n, w) => n + longMs(w), 0);
   u._stallLimit = startedSincePlay ? STALL_MS : START_STALL_MS;
   u.onboundary = (e) => {
     lastSpeechProgress = performance.now();
-    u._stallLimit = STALL_MS;
+    u._stallLimit = STALL_MS + longest;
     if (e.name !== 'word') return;
     let idx = 0;
     for (let i = starts.length - 1; i >= 0; i--) {
       if (starts[i] <= e.charIndex) { idx = i; break; }
     }
     const w = chunk[idx];
+    u._stallLimit = STALL_MS + longMs(w);
     if (w.globalIdx !== curWord) setCurrentWord(w.globalIdx);
   };
 
@@ -2785,7 +2924,7 @@ if (KEEPALIVE && 'mediaSession' in navigator) {
 // ════════════════════════════════════════
 // INIT — restore persisted state
 // ════════════════════════════════════════
-(function () {
+(async function () {
   renderThemeGrid();
   setTheme(currentTheme);
   renderFontGrid();
@@ -2809,6 +2948,8 @@ if (KEEPALIVE && 'mediaSession' in navigator) {
   ps.addEventListener('pointercancel', end);
   ps.addEventListener('touchstart', begin, { passive: true });
   ps.addEventListener('touchend', end);
+
+  await loadLibrary();
 
   // Auto-titled notes saved before frontmatter support were titled "---";
   // re-derive only titles that still match the old first-line rule.
